@@ -1,0 +1,135 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Profile {
+  id            String   @id @db.Uuid // Matches auth.users.id
+  email         String   @unique
+  fullName      String?  @map("full_name")
+  avatarUrl     String?  @map("avatar_url")
+  baseCurrency  String   @default("USD") @map("base_currency")
+  mfaEnabled    Boolean  @default(false) @map("mfa_enabled")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  accounts       Account[]
+  categories     Category[]
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
+
+  @@map("profiles")
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT
+  INVESTMENT
+  MANUAL_ASSET
+  MANUAL_LIABILITY
+}
+
+model Account {
+  id                String       @id @default(uuid()) @db.Uuid
+  userId            String       @db.Uuid @map("user_id")
+  name              String
+  type              AccountType
+  balance           Decimal      @db.Decimal(12, 2)
+  plaidItemId       String?      @map("plaid_item_id")
+  plaidAccessToken  String?      @map("plaid_access_token")
+  currency          String       @default("USD")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  profile           Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Category {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid @map("user_id")
+  parentId        String?  @db.Uuid @map("parent_id")
+  name            String
+  color           String?  // Hex code or Tailwind color
+  icon            String?  // Lucide icon key name
+  monthlyTarget   Decimal? @db.Decimal(12, 2) @map("monthly_target")
+  rolloverEnabled Boolean  @default(false) @map("rollover_enabled")
+  rolloverAmount  Decimal  @default(0.00) @db.Decimal(12, 2) @map("rollover_amount")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  profile         Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent          Category? @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Category[] @relation("CategoryHierarchy")
+  transactions    Transaction[]
+  rules           RecurringRule[]
+
+  @@index([userId])
+  @@map("categories")
+}
+
+model Transaction {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid @map("user_id")
+  accountId      String       @db.Uuid @map("account_id")
+  categoryId     String?      @db.Uuid @map("category_id")
+  amount         Decimal      @db.Decimal(12, 2) // positive = income, negative = expense
+  date           DateTime     @db.Date
+  description    String
+  merchant       String
+  pendingStatus  Boolean      @default(false) @map("pending_status")
+  splitParentId  String?      @db.Uuid @map("split_parent_id")
+  tags           String[]     @default([])
+  receiptUrl     String?      @map("receipt_url")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  profile        Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category       Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  parent         Transaction? @relation("TransactionSplit", fields: [splitParentId], references: [id], onDelete: SetNull)
+  splits         Transaction[] @relation("TransactionSplit")
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([categoryId])
+  @@index([date])
+  @@map("transactions")
+}
+
+enum RuleInterval {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model RecurringRule {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @db.Uuid @map("user_id")
+  name             String
+  interval         RuleInterval
+  amount           Decimal      @db.Decimal(12, 2)
+  nextExpectedDate DateTime     @db.Date @map("next_expected_date")
+  matchingMerchant String       @map("matching_merchant")
+  categoryId       String?      @db.Uuid @map("category_id")
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  profile          Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category         Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("recurring_rules")
+}
